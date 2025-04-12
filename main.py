@@ -4,6 +4,9 @@ import os
 from dotenv import load_dotenv
 import pandas as pd
 from urllib.parse import urlparse
+import re
+from datetime import datetime, timedelta
+from collections import defaultdict
 
 # Load environment variables
 load_dotenv()
@@ -39,11 +42,34 @@ def go_to_next_page(page):
     if next_button and next_button.is_visible():
         next_button.click()
         page.wait_for_timeout(2000)  # Wait for the next page to load
+        print("click!")
         return True
     return False
 
+
+def get_exact_post_date(number, unit):
+    today = datetime.today()
+
+    if unit == "minute":
+        delta = timedelta(minutes=number)
+    elif unit == "hour":
+        delta = timedelta(hours=number)
+    elif unit == "day":
+        delta = timedelta(days=number)
+    elif unit == "week":
+        delta = timedelta(weeks=number)
+    elif unit == "month":
+        delta = timedelta(days=30 * number)  # approximation
+    elif unit == "year":
+        delta = timedelta(days=365 * number)  # approximation
+    else:
+        delta = timedelta(0)
+
+    post_date = today - delta
+    return post_date.strftime('%Y-%m-%d')    
+
 # Main function to login and scrape jobs
-def login_and_scrape_with_descriptions(query="data analyst", location="Singapore", max_jobs=25):
+def login_and_scrape_with_descriptions(job_dict={},query="data analyst", location="Singapore", max_jobs=25):
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             user_data_dir="./profile",
@@ -65,20 +91,20 @@ def login_and_scrape_with_descriptions(query="data analyst", location="Singapore
         page = context.pages[0] if context.pages else context.new_page()
         load_cookies(page)
 
-        search_url = f"https://www.linkedin.com/jobs/search/?keywords={query}&location={location}&f_E=1"
+        search_url = f"https://www.linkedin.com/jobs/search/?keywords={query}&location={location}&f_E=1&sortBy=DD"
         print(f"🔍 Navigating to: {search_url}")
         page.goto(search_url, wait_until="networkidle")
 
-        # Check login status
         if not login_check(page):
             print("❌ Need login!")
             return None
 
-        page.mouse.wheel(0, 1000)  # Scroll to load jobs
+        page.mouse.wheel(0, 1000)
         page.wait_for_selector('.job-card-container')
 
         job_count = 0
         results = []
+        seen_job_ids = set()
 
         while job_count < max_jobs:
             job_cards = page.query_selector_all('.job-card-container')
@@ -89,54 +115,97 @@ def login_and_scrape_with_descriptions(query="data analyst", location="Singapore
                     card.click()
                     page.wait_for_timeout(2000)
 
-                    # Get job details
                     job_title_elem = page.query_selector("h1.t-24.t-bold")
                     job_title = job_title_elem.inner_text().strip() if job_title_elem else "N/A"
 
                     link_elem = page.query_selector("div.job-details-jobs-unified-top-card__job-title a")
                     raw_link = link_elem.get_attribute("href") if link_elem else None
                     clean_link = urlparse(raw_link).path if raw_link else "N/A"
+                    job_id_match = re.search(r"/jobs/view/(\d+)", raw_link)
+                    job_id = job_id_match.group(1) if job_id_match else clean_link  # fallback
+                    # Skip if we've already seen this job in any previous run
+                    if job_id in seen_job_ids:
+                        print(f"⚠️ Already seen job, skipping: {job_title} (job_id: {job_id})")
+                        continue
+
+                    # Add to seen list for this run
+                    seen_job_ids.add(job_id)
+
+
 
                     company_elem = page.query_selector(".job-details-jobs-unified-top-card__company-name")
                     company = company_elem.inner_text().strip() if company_elem else "N/A"
 
-                    posted_elem = page.query_selector(".jobs-unified-top-card__posted-date")
-                    posted_time = posted_elem.inner_text().strip() if posted_elem else "N/A"
+                    meta_elem = page.query_selector(".job-details-jobs-unified-top-card__tertiary-description-container")
+                    meta_text = meta_elem.inner_text() if meta_elem else ""
+                    date_match = re.search(r"(Reposted\s+)?(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago", meta_text)
+                    if date_match:
+                        number = int(date_match.group(2))
+                        unit = date_match.group(3)
+                        exact_date = get_exact_post_date(number, unit)
+                    else:
+                        exact_date = "N/A"
 
-                    applicants_elem = page.query_selector(".jobs-unified-top-card__applicant-count")
-                    applicants = applicants_elem.inner_text().strip() if applicants_elem else "N/A"
+                    # Extract raw applicants info like "55 applicants" or "Over 100 applicants"
+                    applicants_match = re.search(r"(Over\s+)?\d+\s+applicants", meta_text)
+                    applicants = applicants_match.group(0) if applicants_match else "N/A"
 
                     desc_elem = page.query_selector(".jobs-description-content__text--stretch")
-                    description = desc_elem.inner_text().strip() if desc_elem else "No description found"
+                    description = desc_elem.inner_html().strip() if desc_elem else "No description found"
 
+                    snapshot = {
+                        "scraped_at": datetime.now().isoformat(),
+                        "applicants": applicants
+                    }
                     print(f"\n--- Job {job_count + 1} ---")
                     print("Title:", job_title)
-
-                    results.append({
-                        "Title": job_title,
-                        "Company": company,
-                        "Job Link": clean_link,
-                        "Description": description
-                    })
-
+                    if job_id in job_dict:
+                        # Job seen before → add new snapshot
+                        job_dict[job_id]["snapshots"].append(snapshot)
+                    else:
+                        job_dict[job_id] = {
+                            "job_id": job_id,
+                            "Title": job_title,
+                            "Link": clean_link,
+                            "Company": company,
+                            "Post Date": exact_date,
+                            "Description": description,
+                            "snapshots": [snapshot]
+                        }
                     job_count += 1
 
                 except Exception as e:
                     print(f"⚠️ Error scraping job {job_count + 1}: {e}")
 
-            # Check if we should continue to the next page
             if job_count < max_jobs and not go_to_next_page(page):
                 print("⚠️ No more pages to scrape.")
                 break
 
-        # Convert results to DataFrame and return
-        df = pd.DataFrame(results)
-        return df
+    return job_dict
 
+
+def load_job_data(file_path):
+    """Load job data from JSON file if it exists, otherwise return empty dict."""
+    if os.path.exists(file_path):
+        with open(file_path, 'r', encoding='utf-8') as f:
+            print(f"Loaded jobs from previous run.")
+            job_dict = json.load(f)
+            seen_job_ids = set(job_dict.keys())
+            return job_dict, seen_job_ids
+    else:
+        print("No previous data found.")        
+    return {},set()
+
+def save_job_data(file_path, job_dict):
+    """Save job data to JSON file."""
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(job_dict, f, indent=4, ensure_ascii=False)
+        print(f"Jobs saved to {file_path}")
 
 if __name__ == '__main__':
-    df = login_and_scrape_with_descriptions(query="data analyst", location="Singapore", max_jobs=35)
-    if df is not None:
-        df.to_csv("jobs.csv", index=False)
-        print("✅ Jobs saved to jobs.csv")
+    JSON_FILE = "job_data_dup.json"
+
+    job_dict,seen_job_ids = load_job_data(JSON_FILE)
+    login_and_scrape_with_descriptions(job_dict,query="data analyst", location="Singapore", max_jobs=5)
+    save_job_data(JSON_FILE, job_dict)
 

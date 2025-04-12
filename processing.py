@@ -68,19 +68,19 @@ TECH_KEYWORDS = {
 
 for desc in df['Description'].dropna():
     sections = split_into_sections(desc)
+    with open("log.txt", "a") as file:
+        for section_name, content in sections.items():
+            file.write(f"{section_name}: {content}\n\n")
     for section_name, content in sections.items():
         if any(key in section_name for key in TARGET_SECTIONS):
             doc = nlp(content.lower())
 
-
-            # ✅ NEW: Noun chunks (phrases)
             noun_chunks = [
                 cleaned for chunk in doc.noun_chunks
                 if (cleaned := clean_noun_chunk(chunk.text))
             ]
             phrase_counter.update(noun_chunks)
 
-            # ✅ NEW: Named entities (NER)
             named_ents = [
                 ent.text.lower().strip()
                 for ent in doc.ents
@@ -94,14 +94,14 @@ for desc in df['Description'].dropna():
 
 
 print("\n🧩 Top noun phrase keywords:")
-for phrase, count in phrase_counter.most_common(30):
+for phrase, count in phrase_counter.most_common(10):
     print(f"{phrase}: {count}")
 
 print("\n🧠 Top named entities (multi-word):")
-for entity, count in entity_counter.most_common(30):
+for entity, count in entity_counter.most_common(10):
     print(f"{entity}: {count}")
 
 
 print("\n🧠 Custom detected tech keywords:")
-for kw, count in custom_skill_counter.most_common(30):
+for kw, count in custom_skill_counter.most_common(10):
     print(f"{kw}: {count}")
