@@ -97,14 +97,23 @@ def extract_sections_from_html(description_html: str):
     # Join consecutive text snippets in each section
     return {k: [line.strip() for line in v if line.strip()] for k, v in sections.items()}
 
+input_file="job_data_0414.json"
+output_file="job_data_0414_classify.json"
 
-df = pd.read_csv("jobs.csv", encoding='utf-8')  # Ensure correct CSV reading
+with open(input_file, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+descriptions = [
+    job["Description"] 
+    for job in data.values() 
+    if "Description" in job and job["Description"]
+]
 
 all_results = []
-for desc in df['Description'].dropna():
+for desc in descriptions:
     sections = extract_sections_from_html(desc)
     all_results.append(sections)
 
-with open("classify.json", "w", encoding='utf-8') as file:
+with open(output_file, "w", encoding='utf-8') as file:
     json.dump(all_results, file, indent=4, ensure_ascii=False)  # Fix here # Single structured file
 

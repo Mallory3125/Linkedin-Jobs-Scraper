@@ -38,13 +38,31 @@ def login_check(page):
 
 # Function to click the pagination button and go to the next page
 def go_to_next_page(page):
-    next_button = page.query_selector("li.artdeco-pagination__indicator--number + li")
+    next_button = page.query_selector("li.artdeco-pagination__indicator--number.selected + li")
+    print(f"next page is :{next_button.inner_text().strip()}")
     if next_button and next_button.is_visible():
         next_button.click()
         page.wait_for_timeout(2000)  # Wait for the next page to load
+        page.mouse.wheel(0, 1000)
         print("click!")
         return True
     return False
+
+def scroll_job_list(page,max_time=5):
+    for i in range(max_time):
+        job_list_container = page.query_selector("div.scaffold-layout__list")
+        if not job_list_container:
+            print("⚠️ Couldn't find job list container!")
+            return
+        box = job_list_container.bounding_box()
+        if box:
+            # Move the mouse to the center of the element
+            mouse_x = box['x'] + box['width'] / 2
+            mouse_y = box['y'] + box['height'] / 2
+            page.mouse.move(mouse_x, mouse_y)
+            page.mouse.wheel(0, 800)  
+
+        page.wait_for_timeout(2000)
 
 
 def get_exact_post_date(number, unit):
@@ -98,23 +116,29 @@ def login_and_scrape_with_descriptions(job_dict={},query="data analyst", locatio
         if not login_check(page):
             print("❌ Need login!")
             return None
-
-        page.mouse.wheel(0, 1000)
+        else:
+            print("login success! ")
+            
+        page.screenshot(path="screenshot.png")
         page.wait_for_selector('.job-card-container')
+        # page.mouse.wheel(0, 1000)
 
         job_count = 0
         results = []
         seen_job_ids = set()
-
+        
         while job_count < max_jobs:
+            scroll_job_list(page)
             job_cards = page.query_selector_all('.job-card-container')
+
+
             for i, card in enumerate(job_cards):
                 if job_count >= max_jobs:
                     break
                 try:
                     card.click()
                     page.wait_for_timeout(2000)
-
+                    
                     job_title_elem = page.query_selector("h1.t-24.t-bold")
                     job_title = job_title_elem.inner_text().strip() if job_title_elem else "N/A"
 
@@ -125,12 +149,15 @@ def login_and_scrape_with_descriptions(job_dict={},query="data analyst", locatio
                     job_id = job_id_match.group(1) if job_id_match else clean_link  # fallback
                     # Skip if we've already seen this job in any previous run
                     if job_id in seen_job_ids:
+                        page.screenshot(path=f"screenshot{job_id}.png")
                         print(f"⚠️ Already seen job, skipping: {job_title} (job_id: {job_id})")
+                        if(len(seen_job_ids)>30):
+                            return job_dict
                         continue
 
                     # Add to seen list for this run
                     seen_job_ids.add(job_id)
-
+                    print("id:", job_id)
 
 
                     company_elem = page.query_selector(".job-details-jobs-unified-top-card__company-name")
@@ -145,6 +172,7 @@ def login_and_scrape_with_descriptions(job_dict={},query="data analyst", locatio
                         exact_date = get_exact_post_date(number, unit)
                     else:
                         exact_date = "N/A"
+                    print(exact_date)    
 
                     # Extract raw applicants info like "55 applicants" or "Over 100 applicants"
                     applicants_match = re.search(r"(Over\s+)?\d+\s+applicants", meta_text)
@@ -155,7 +183,8 @@ def login_and_scrape_with_descriptions(job_dict={},query="data analyst", locatio
 
                     snapshot = {
                         "scraped_at": datetime.now().isoformat(),
-                        "applicants": applicants
+                        "applicants": applicants,
+                        "keyword":query
                     }
                     print(f"\n--- Job {job_count + 1} ---")
                     print("Title:", job_title)
@@ -176,6 +205,8 @@ def login_and_scrape_with_descriptions(job_dict={},query="data analyst", locatio
 
                 except Exception as e:
                     print(f"⚠️ Error scraping job {job_count + 1}: {e}")
+                    context.close()
+                    return job_dict 
 
             if job_count < max_jobs and not go_to_next_page(page):
                 print("⚠️ No more pages to scrape.")
@@ -203,9 +234,10 @@ def save_job_data(file_path, job_dict):
         print(f"Jobs saved to {file_path}")
 
 if __name__ == '__main__':
-    JSON_FILE = "job_data_dup.json"
+    INPUT_FILE = "job_data_0414.json"
+    OUTPUT_FILE = "job_data_0421.json"
 
-    job_dict,seen_job_ids = load_job_data(JSON_FILE)
-    login_and_scrape_with_descriptions(job_dict,query="data analyst", location="Singapore", max_jobs=5)
-    save_job_data(JSON_FILE, job_dict)
+    job_dict,seen_job_ids = load_job_data(INPUT_FILE)
+    login_and_scrape_with_descriptions(job_dict,query="Data Science", location="Singapore", max_jobs=200)
+    save_job_data(OUTPUT_FILE, job_dict)
 

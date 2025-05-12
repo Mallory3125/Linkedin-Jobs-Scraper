@@ -3,16 +3,16 @@
 
 ### Must Do
 - [x] Finalize Linkedin job scraping script 
-- [ ] Store job data with fields: `title`, `company`, `location`, `description`, `date`
-- [ ] Clean job descriptions (strip HTML, normalize whitespace, lowercase, etc.)
-- [ ] Split description into sections:
-  - [ ] About Company
-  - [ ] Responsibilities
-  - [ ] Requirements / Qualifications
+- [x] Store job data with fields: `title`, `company`, `location`, `description`, `date`
+- [x] Clean job descriptions (strip HTML, normalize whitespace, lowercase, etc.)
+- [x] Split description into sections:
+  - [x] About Company
+  - [x] Responsibilities
+  - [x] Requirements / Qualifications
 
 ### Nice to Have
 - [ ] Add automatic retry or proxy handling to scraper
-- [ ] Store both raw and cleaned descriptions for reference
+- [x] Store both raw and cleaned descriptions for reference
 
 ### Avoid (Time Sink)
 - ❌ Making the scraper handle every possible HTML variation
